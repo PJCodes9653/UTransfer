@@ -10,7 +10,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const PORT = 3000;
+const PORT = process.env.PORT || 5000;
+
+// Uploads folder
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
 
@@ -58,16 +60,14 @@ app.post("/upload", upload.single("file"), (req, res) => {
 
   files.push(meta);
 
-  // Debug logs
-  console.log("📂 New file uploaded:");
-  console.log(JSON.stringify(meta, null, 2));
+  console.log("📂 New file uploaded:", meta);
   console.log("📂 Current files:", files.length);
 
   io.emit("update", files);
   res.json({ success: true });
 });
 
-// Download route (PIN protected)
+// Download route
 app.post("/download", (req, res) => {
   const { filename, pin } = req.body;
   const file = files.find(f => f.stored === filename);
@@ -80,7 +80,7 @@ app.post("/download", (req, res) => {
   res.download(filePath, file.name);
 });
 
-// Delete route (PIN protected)
+// Delete route
 app.post("/delete", (req, res) => {
   const { filename, pin } = req.body;
   const file = files.find(f => f.stored === filename);
@@ -102,22 +102,7 @@ io.on("connection", socket => {
   socket.emit("update", files);
 });
 
-// Show LAN + Localhost IP
+// Start server (Render uses this)
 server.listen(PORT, "0.0.0.0", () => {
-  const nets = os.networkInterfaces();
-  let lanIp = "localhost";
-
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      if (net.family === "IPv4" && !net.internal) {
-        lanIp = net.address;
-        break;
-      }
-    }
-    if (lanIp !== "localhost") break;
-  }
-
-  console.log(`🚀 UTransfer running at:`);
-  console.log(`- Local:   http://localhost:${PORT}`);
-  console.log(`- Network: http://${lanIp}:${PORT}`);
+  console.log(`🚀 UTransfer running at http://localhost:${PORT}`);
 });
