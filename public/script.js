@@ -33,8 +33,8 @@ fileInput.addEventListener("change", e => {
   }
 });
 
-// --- Upload Function ---
-async function handleUpload(file) {
+// --- Upload Function (with progress) ---
+function handleUpload(file) {
   const pin = pinInput.value.trim();
   const nickname = nicknameInput.value.trim();
 
@@ -43,17 +43,87 @@ async function handleUpload(file) {
     return;
   }
 
+  // create a temporary upload item so user sees progress immediately
+  const id = "upload-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7);
+  const li = document.createElement("li");
+  li.className = "file-item upload-item";
+  li.id = id;
+  li.innerHTML = `
+    <span>
+      <b>${escapeHtml(file.name)}</b> (${(file.size/1024).toFixed(1)} KB) <em class="upload-status">Uploading...</em>
+    </span>
+    <span class="progress-wrap">
+      <div class="progress-container"><div class="progress-bar" style="width:0%">0%</div></div>
+      <button class="cancel-btn">Cancel</button>
+    </span>
+  `;
+
+  // insert at top so it's visible immediately
+  fileList.insertBefore(li, fileList.firstChild);
+
+  const progressBar = li.querySelector('.progress-bar');
+  const statusEl = li.querySelector('.upload-status');
+  const cancelBtn = li.querySelector('.cancel-btn');
+
   const formData = new FormData();
   formData.append("file", file);
   formData.append("pin", pin);
   formData.append("nickname", nickname);
 
-  const res = await fetch("/upload", { method: "POST", body: formData });
-  const data = await res.json();
-  if (!data.success) {
-    alert("Upload failed");
-  }
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/upload", true);
+
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable) {
+      const percent = Math.round((e.loaded / e.total) * 100);
+      progressBar.style.width = percent + "%";
+      progressBar.textContent = percent + "%";
+    }
+  };
+
+  xhr.onreadystatechange = () => {
+    if (xhr.readyState === 4) {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+        if (data && data.success) {
+          progressBar.style.width = '100%';
+          progressBar.textContent = '100%';
+          statusEl.textContent = 'Uploaded';
+          // server will emit update; remove the temporary item shortly
+          setTimeout(() => { if (li && li.parentNode) li.remove(); }, 1000);
+        } else {
+          statusEl.textContent = 'Failed';
+          alert('Upload failed: ' + (data.error || xhr.statusText || 'Unknown'));
+          if (li && li.parentNode) li.remove();
+        }
+      } else {
+        statusEl.textContent = 'Failed';
+        alert('Upload failed: ' + xhr.status + ' ' + xhr.statusText);
+        if (li && li.parentNode) li.remove();
+      }
+    }
+  };
+
+  // wire cancel
+  cancelBtn.onclick = () => {
+    try { xhr.abort(); } catch (e) {}
+    if (li && li.parentNode) li.remove();
+  };
+
+  // keep reference so other code could cancel if needed
+  li._xhr = xhr;
+
+  xhr.send(formData);
 }
+
+// allow cancel from global scope if needed
+window.cancelUpload = id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  try { el._xhr && el._xhr.abort(); } catch (e) {}
+  if (el.parentNode) el.parentNode.removeChild(el);
+};
 
 // --- Escape HTML (for safe rendering) ---
 function escapeHtml(s) {
@@ -67,11 +137,15 @@ function escapeHtml(s) {
 }
 
 function renderFiles(files) {
-  fileList.innerHTML = "";
+  // Preserve any ongoing upload items so progress doesn't disappear mid-upload
+  const ongoing = Array.from(fileList.querySelectorAll('.upload-item'));
+  fileList.innerHTML = ""; // clear all and re-add ongoing first
+  ongoing.forEach(n => fileList.appendChild(n));
+
   files.forEach((f, idx) => {
     const stored = f.stored;
     const nameEnc = encodeURIComponent(f.name);
-    const nicknamePart = f.nickname ? ` (By ${escapeHtml(f.nickname)})` : "";
+    const nicknamePart = f.nickname ? ` -${escapeHtml(f.nickname)}` : "";
 
     const li = document.createElement("li");
     li.className = "file-item";
